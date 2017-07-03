@@ -26,17 +26,10 @@ type Friends struct {
 }
 
 func main() {
-	var response Friends
-
-	err := vkAPIRequest("friends.get", map[string]string{
-		"user_id": "129096",
-		"fields":  "nickname",
-	}, &response)
-
+	var response, err = find_common_friends([]string {"5950896", "1058767", "795799"})
 	if err != nil {
 		panic(err)
 	}
-
 	fmt.Println(response)
 }
 
@@ -51,7 +44,31 @@ func get_friends(id string) ([]User, error) {
 }
 
 func find_common_friends(ids []string) ([]User, error) {
-	return nil, nil
+	var common_friends []User
+	common_friends = nil
+	for i := range ids {
+		friends, err := get_friends(ids[i])
+		if err != nil { return nil, err}
+		if common_friends==nil {
+			common_friends = friends
+		} else {
+			common_friends, err = find_common(common_friends, friends)
+			if err != nil {return nil, err}
+		}
+	}
+	return common_friends, nil
+}
+
+func find_common(list1 []User, list2 []User) ([]User, error) {
+	common := []User {}
+	for i := range list1 {
+		for j := range list2 {
+			if list1[i] == list2[j] {
+				common = append(common, list1[i])
+			}
+		}
+	}
+	return common, nil
 }
 
 func vkAPIRequest(method string, params map[string]string, response interface{}) error {
