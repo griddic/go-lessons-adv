@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"sort"
 )
 
 // User
@@ -43,6 +44,10 @@ func get_friends(id string) ([]User, error) {
 	return response.Response.Items, err
 }
 
+func less(userLeft, userRight User) bool {
+	return userLeft.ID < userRight.ID
+}
+
 func find_common_friends(ids []string) ([]User, error) {
 	var common_friends []User
 	common_friends = nil
@@ -51,21 +56,30 @@ func find_common_friends(ids []string) ([]User, error) {
 		if err != nil { return nil, err}
 		if common_friends==nil {
 			common_friends = friends
+			sort.Slice(common_friends,  func(i, j int) bool { return less(common_friends[i], common_friends[j])})
 		} else {
-			common_friends, err = find_common(common_friends, friends)
+			common_friends, err = find_common_in_sorted_slices(common_friends, friends)
 			if err != nil {return nil, err}
 		}
 	}
 	return common_friends, nil
 }
 
-func find_common(list1 []User, list2 []User) ([]User, error) {
+func find_common_in_sorted_slices(slice1 , slice2 []User) ([]User, error) {
+	i := 0
+	j := 0
 	common := []User {}
-	for i := range list1 {
-		for j := range list2 {
-			if list1[i] == list2[j] {
-				common = append(common, list1[i])
-			}
+	for (i < len(slice1)) && (j < len(slice2)) {
+		if slice1[i].ID == slice2[j].ID {
+			common = append(common, slice1[i])
+			i += 1
+			j += 1
+			continue
+		}
+		if less(slice1[i], slice2[j]) {
+			i += 1
+		} else {
+			j += 1
 		}
 	}
 	return common, nil
