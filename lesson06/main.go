@@ -53,10 +53,10 @@ func find_common_friends(ids []string) ([]User, error) {
 	common_friends = nil
 	for i := range ids {
 		friends, err := get_friends(ids[i])
+		sort.Slice(friends,  func(i, j int) bool { return less(friends[i], friends[j])})
 		if err != nil { return nil, err}
 		if common_friends==nil {
 			common_friends = friends
-			sort.Slice(common_friends,  func(i, j int) bool { return less(common_friends[i], common_friends[j])})
 		} else {
 			common_friends, err = find_common_in_sorted_slices(common_friends, friends)
 			if err != nil {return nil, err}
