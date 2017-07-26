@@ -30,11 +30,12 @@ type Friends struct {
 type AllResponses [][]User
 
 func main() {
-	vkIDs := []string{"129096", "1298437"}
+	vkIDs := []string{"1993321", "254657653", "287985479", "57244156", "1580155", "237893123", "52120417"}
 	allresp := make(AllResponses, 0, len(vkIDs)) //Создаем слайс слайсов для хранения друзей всех юзеров
 
 	for _, vkID := range vkIDs { //Перебор всех юзеров, получение их друзей и присоединение результата запроса в общий слайс слайсов
 		friendList, err := get_friends(vkID)
+		fmt.Println(len(friendList))
 
 		if err != nil {
 			panic(err)

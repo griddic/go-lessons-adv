@@ -27,7 +27,7 @@ type Friends struct {
 }
 
 func main() {
-	var response, err = find_common_friends([]string{"5950896", "1058767", "795799"})
+	var response, err = find_common_friends([]string{"1993321", "254657653", "287985479", "57244156", "1580155", "237893123", "52120417"})
 	if err != nil {
 		panic(err)
 	}
