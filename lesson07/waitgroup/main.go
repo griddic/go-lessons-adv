@@ -110,6 +110,8 @@ func find_common_friends(allresp AllResponses) ([]User, error) { //Магия
 			for key, value := range mapOfFriends { //Проходим по мапе и ищем всех неиспорченных юзеров и удаляем эти пары
 				if value.ID != -1 {
 					delete(mapOfFriends, key)
+				} else {
+					mapOfFriends[key] = User{0, value.Fname, value.Lname, value.Nickname, value.Hidden}
 				}
 			}
 		}
