@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// User
+// User ...
 type User struct {
 	ID       int64  `json:"id"`
 	Fname    string `json:"first_name"`
@@ -124,9 +124,9 @@ func find_common_friends(allresp AllResponses) ([]User, error) { //Магия
 
 		return commonFriendList, nil
 
-	} else {
-		return nil, nil
 	}
+
+	return nil, nil
 
 }
 
