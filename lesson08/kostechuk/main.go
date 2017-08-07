@@ -30,15 +30,15 @@ type Friends struct {
 
 // DownloadCommand сообщение-команда
 type DownloadCommand struct {
-	JobID    int
+	jobID    int
 	userID   int64
-	PhotoURL string
+	photoURL string
 }
 
 // DownloadReport сообщение-результат
 type DownloadReport struct {
 	workerID           int
-	JobID              int
+	jobID              int
 	userID             int64
 	photoFullLocalPath string
 	err                error
@@ -74,32 +74,38 @@ func main() {
 		close(dnldCmdChan)
 	}()
 
-	for range response { // Забираем из канала сообщения с результатом выполнения команды и выводим результат на экран
+	counter := make([]uint, threads) // Забираем из канала сообщения с результатом выполнения команды, считаем и выводим результат на экран
+	for range response {
 		report := <-dnldRepChan
 		if report.errText != "" {
 			fmt.Println(report.errText)
 		} else {
-			fmt.Printf("(WorkerID:%v JobID:%v UserID:%v) User photo saved to '%v'\n", report.workerID, report.JobID, report.userID, report.photoFullLocalPath)
+			fmt.Printf("(WorkerID:%v jobID:%v UserID:%v) User photo saved to '%v'\n", report.workerID, report.jobID, report.userID, report.photoFullLocalPath)
 		}
+		counter[report.workerID-1]++
 	}
-	fmt.Println("Done!", len(response), "photos processed.")
+	fmt.Println("==================")
+	fmt.Println("Done!", len(response), "jobs processed.")
+	for index, count := range counter {
+		fmt.Printf("Worker %v processed %v jobs \n", index+1, count)
+	}
 }
 
 func downloader(dnldCmdChan chan DownloadCommand, dnldRepChan chan DownloadReport, workerID int, dnldDir string) {
 	for friend := range dnldCmdChan {
 		fileName := strconv.FormatInt(friend.userID, 10) + ".jpg" // Формируем имя файла
 
-		response, err := http.Get(friend.PhotoURL) // Скачиваем картинку
+		response, err := http.Get(friend.photoURL) // Скачиваем картинку
 		if err != nil {                            // Если ошибка, отправляем результат в канал и переходим к следующей итерации
-			errText := "Can't download photo " + friend.PhotoURL + " ...skipping"
-			dnldRepChan <- DownloadReport{0, 0, 0, "", err, errText}
+			errText := "Can't download photo " + friend.photoURL + " ...skipping"
+			dnldRepChan <- DownloadReport{workerID, 0, 0, "", err, errText}
 			continue
 		}
 
 		file, err := os.Create(dnldDir + "/" + fileName) // Создаем файл на локальном диске
 		if err != nil {                                  // Если ошибка, отправляем результат в канал и переходим к следующей итерации
 			errText := "Can't create file " + fileName + " ...skipping"
-			dnldRepChan <- DownloadReport{0, 0, 0, "", err, errText}
+			dnldRepChan <- DownloadReport{workerID, 0, 0, "", err, errText}
 			response.Body.Close()
 			continue
 		}
@@ -107,7 +113,7 @@ func downloader(dnldCmdChan chan DownloadCommand, dnldRepChan chan DownloadRepor
 		_, err = io.Copy(file, response.Body) // Записываем то, что скачали по ссылке, в созданный файл
 		if err != nil {                       // Если ошибка, отправляем результат в канал и переходим к следующей итерации
 			errText := "Can't save photo " + fileName + " ...skipping"
-			dnldRepChan <- DownloadReport{0, 0, 0, "", err, errText}
+			dnldRepChan <- DownloadReport{workerID, 0, 0, "", err, errText}
 			response.Body.Close()
 			file.Close()
 			continue
@@ -115,7 +121,7 @@ func downloader(dnldCmdChan chan DownloadCommand, dnldRepChan chan DownloadRepor
 
 		response.Body.Close() // Закрываем response интерфейс и файл. Отправляем результат в канал
 		file.Close()
-		dnldRepChan <- DownloadReport{workerID, friend.JobID, friend.userID, dnldDir + "/" + fileName, nil, ""}
+		dnldRepChan <- DownloadReport{workerID, friend.jobID, friend.userID, dnldDir + "/" + fileName, nil, ""}
 	}
 }
 
