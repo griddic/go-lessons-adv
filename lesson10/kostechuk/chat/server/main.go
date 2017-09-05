@@ -4,8 +4,19 @@ import (
 	"bufio"
 	"log"
 	"net"
-	"time"
+	"strconv"
 )
+
+type channels struct {
+	toClient chan string
+	toLinker chan string
+}
+
+type client struct {
+	ID    int
+	cmd   string
+	chans channels
+}
 
 func main() {
 	l, err := net.Listen("tcp", ":2222")
@@ -14,31 +25,85 @@ func main() {
 	}
 	defer l.Close()
 
+	cmdChan := make(chan client)
+	go linker(cmdChan)
+	nextID := 1
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			log.Printf("Error accepting connection: %v", err)
 		}
-		go clientConnected(conn)
+
+		newuser := client{nextID, "add", channels{make(chan string), make(chan string)}}
+		go userConnected(conn, newuser)
+		cmdChan <- newuser
+		nextID++
 	}
 }
 
-func clientConnected(conn net.Conn) {
-	conn.Write([]byte("Hello, stranger!\n"))
+func linker(cmdChan chan client) {
+	users := map[int]client{}
+	usereventmsg := ""
+	newmessage := ""
+
+	for {
+		select {
+		case userevent := <-cmdChan:
+			if userevent.cmd == "add" {
+				users[userevent.ID] = userevent
+				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has joined the chat"
+				log.Printf("%v", usereventmsg)
+			} else if userevent.cmd == "del" {
+				delete(users, userevent.ID)
+				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has disconnected"
+				log.Printf("%v", usereventmsg)
+				// закрыть каналы!
+			}
+		default:
+		}
+
+		if usereventmsg != "" {
+			for _, u := range users {
+				u.chans.toClient <- usereventmsg
+			}
+			usereventmsg = ""
+		}
+
+		for _, u := range users {
+			select {
+			case newmessage = <-u.chans.toLinker:
+				newmessage = "Guest" + strconv.Itoa(u.ID) + ": " + newmessage
+				break
+			default:
+			}
+		}
+
+		if newmessage != "" {
+			for _, u := range users {
+				u.chans.toClient <- newmessage
+			}
+			newmessage = ""
+		}
+	}
+}
+
+func userConnected(conn net.Conn, user client) {
+	conn.Write([]byte("Hello Guest" + strconv.Itoa(user.ID) + "!\n"))
 	defer conn.Close()
 	rd := bufio.NewReader(conn)
 	for {
 		str, err := rd.ReadString('\n')
 		if err != nil {
-			log.Printf("Client disconnected: %v", err)
+			log.Printf("Guest%v disconnected: %v", strconv.Itoa(user.ID), err)
 			return
 		}
 		// log.Println([]byte(str))
 		if str == "exit\n" || str == "exit\r\n" {
-			log.Printf(`Client typed "exit"`)
+			log.Printf(`Guest%v typed "exit"`, strconv.Itoa(user.ID))
 			return
 		}
-		time.Sleep(time.Second)
+
 		conn.Write([]byte(str))
 	}
 }
