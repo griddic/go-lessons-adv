@@ -105,7 +105,7 @@ func userConnected(conn net.Conn, user client, cmdChan chan client) {
 			log.Printf("Guest%v disconnected: %v", strconv.Itoa(user.ID), err)
 			return
 		}
-		log.Println([]byte(str))
+		// log.Println([]byte(str))
 		if str == "exit\n" || str == "exit\r\n" {
 			cmdChan <- client{user.ID, "del", channels{nil, nil}}
 			log.Printf(`Guest%v typed "exit"`, strconv.Itoa(user.ID))
