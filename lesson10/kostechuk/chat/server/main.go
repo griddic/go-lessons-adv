@@ -36,7 +36,7 @@ func main() {
 		}
 
 		newuser := client{nextID, "add", channels{make(chan string), make(chan string)}}
-		go userConnected(conn, newuser)
+		go userConnected(conn, newuser, cmdChan)
 		cmdChan <- newuser
 		nextID++
 	}
@@ -52,13 +52,10 @@ func linker(cmdChan chan client) {
 		case userevent := <-cmdChan:
 			if userevent.cmd == "add" {
 				users[userevent.ID] = userevent
-				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has joined the chat"
-				log.Printf("%v", usereventmsg)
+				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has joined the chat\n"
 			} else if userevent.cmd == "del" {
 				delete(users, userevent.ID)
-				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has disconnected"
-				log.Printf("%v", usereventmsg)
-				// закрыть каналы!
+				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has disconnected\n"
 			}
 		default:
 		}
@@ -88,22 +85,32 @@ func linker(cmdChan chan client) {
 	}
 }
 
-func userConnected(conn net.Conn, user client) {
+func userConnected(conn net.Conn, user client, cmdChan chan client) {
 	conn.Write([]byte("Hello Guest" + strconv.Itoa(user.ID) + "!\n"))
 	defer conn.Close()
+	defer close(user.chans.toClient)
+	defer close(user.chans.toLinker)
+
+	go func() {
+		for message := range user.chans.toClient {
+			conn.Write([]byte(message))
+		}
+	}()
+
 	rd := bufio.NewReader(conn)
 	for {
 		str, err := rd.ReadString('\n')
 		if err != nil {
+			cmdChan <- client{user.ID, "del", channels{nil, nil}}
 			log.Printf("Guest%v disconnected: %v", strconv.Itoa(user.ID), err)
 			return
 		}
-		// log.Println([]byte(str))
+		log.Println([]byte(str))
 		if str == "exit\n" || str == "exit\r\n" {
+			cmdChan <- client{user.ID, "del", channels{nil, nil}}
 			log.Printf(`Guest%v typed "exit"`, strconv.Itoa(user.ID))
 			return
 		}
-
-		conn.Write([]byte(str))
+		user.chans.toLinker <- str
 	}
 }
