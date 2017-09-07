@@ -7,15 +7,20 @@ import (
 	"strconv"
 )
 
-type channels struct {
-	toClient chan string
-	toLinker chan string
-}
+// type channels struct {
+// 	toClient chan string
+// 	toLinker chan string
+// }
 
 type client struct {
-	ID    int
-	cmd   string
-	chans channels
+	ID           int
+	cmd          string
+	toClientChan chan string
+}
+
+type msg struct {
+	userID int
+	body   string
 }
 
 func main() {
@@ -26,7 +31,8 @@ func main() {
 	defer l.Close()
 
 	cmdChan := make(chan client)
-	go linker(cmdChan)
+	toLinkerChan := make(chan msg, 10)
+	go linker(cmdChan, toLinkerChan)
 	nextID := 1
 
 	for {
@@ -35,17 +41,16 @@ func main() {
 			log.Printf("Error accepting connection: %v", err)
 		}
 
-		newuser := client{nextID, "add", channels{make(chan string), make(chan string)}}
-		go userConnected(conn, newuser, cmdChan)
+		newuser := client{nextID, "add", make(chan string)}
+		go userConnected(conn, newuser, cmdChan, toLinkerChan)
 		cmdChan <- newuser
 		nextID++
 	}
 }
 
-func linker(cmdChan chan client) {
+func linker(cmdChan chan client, toLinkerChan chan msg) {
 	users := map[int]client{}
 	usereventmsg := ""
-	newmessage := ""
 
 	for {
 		select {
@@ -55,44 +60,54 @@ func linker(cmdChan chan client) {
 				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has joined the chat\n"
 			} else if userevent.cmd == "del" {
 				delete(users, userevent.ID)
-				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has disconnected\n"
+				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has been disconnected\n"
 			}
-		default:
-		}
 
-		if usereventmsg != "" {
+			if usereventmsg != "" {
+				for _, u := range users {
+					u.toClientChan <- usereventmsg
+				}
+				usereventmsg = ""
+			}
+		case message := <-toLinkerChan:
+			newmessage := "Guest" + strconv.Itoa(message.userID) + ": " + message.body
 			for _, u := range users {
-				u.chans.toClient <- usereventmsg
-			}
-			usereventmsg = ""
-		}
-
-		for _, u := range users {
-			select {
-			case newmessage = <-u.chans.toLinker:
-				newmessage = "Guest" + strconv.Itoa(u.ID) + ": " + newmessage
-				break
-			default:
+				u.toClientChan <- newmessage
 			}
 		}
 
-		if newmessage != "" {
-			for _, u := range users {
-				u.chans.toClient <- newmessage
-			}
-			newmessage = ""
-		}
+		// if usereventmsg != "" {
+		// 	for _, u := range users {
+		// 		u.chans.toClient <- usereventmsg
+		// 	}
+		// 	usereventmsg = ""
+		// }
+		//
+		// for _, u := range users {
+		// 	select {
+		// 	case newmessage = <-u.chans.toLinker:
+		// 		newmessage = "Guest" + strconv.Itoa(u.ID) + ": " + newmessage
+		// 		break
+		// 	default:
+		// 	}
+		// }
+		//
+		// if newmessage != "" {
+		// 	for _, u := range users {
+		// 		u.chans.toClient <- newmessage
+		// 	}
+		// 	newmessage = ""
+		// }
 	}
 }
 
-func userConnected(conn net.Conn, user client, cmdChan chan client) {
+func userConnected(conn net.Conn, user client, cmdChan chan client, toLinkerChan chan msg) {
 	conn.Write([]byte("Hello Guest" + strconv.Itoa(user.ID) + "!\n"))
 	defer conn.Close()
-	defer close(user.chans.toClient)
-	defer close(user.chans.toLinker)
+	defer close(user.toClientChan)
 
 	go func() {
-		for message := range user.chans.toClient {
+		for message := range user.toClientChan {
 			conn.Write([]byte(message))
 		}
 	}()
@@ -101,16 +116,16 @@ func userConnected(conn net.Conn, user client, cmdChan chan client) {
 	for {
 		str, err := rd.ReadString('\n')
 		if err != nil {
-			cmdChan <- client{user.ID, "del", channels{nil, nil}}
+			cmdChan <- client{user.ID, "del", nil}
 			log.Printf("Guest%v disconnected: %v", strconv.Itoa(user.ID), err)
 			return
 		}
 		// log.Println([]byte(str))
 		if str == "exit\n" || str == "exit\r\n" {
-			cmdChan <- client{user.ID, "del", channels{nil, nil}}
+			cmdChan <- client{user.ID, "del", nil}
 			log.Printf(`Guest%v typed "exit"`, strconv.Itoa(user.ID))
 			return
 		}
-		user.chans.toLinker <- str
+		toLinkerChan <- msg{user.ID, str}
 	}
 }
