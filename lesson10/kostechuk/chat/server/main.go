@@ -5,18 +5,25 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"sync"
+	"time"
 )
 
-type channels struct {
-	toClient chan string
-	toLinker chan string
+type client struct {
+	ID           int
+	toClientChan chan string
 }
 
-type client struct {
-	ID    int
-	cmd   string
-	chans channels
+type msg struct {
+	userID int
+	body   string
 }
+
+// Users - global access map listing all users connected
+var Users map[int]client
+
+// SYSTEM_ID - ID for System messages
+const SYSTEM_ID int = 0
 
 func main() {
 	l, err := net.Listen("tcp", ":2222")
@@ -25,8 +32,10 @@ func main() {
 	}
 	defer l.Close()
 
-	cmdChan := make(chan client)
-	go linker(cmdChan)
+	usersmutex := &sync.Mutex{}
+	Users = make(map[int]client)
+	toLinkerChan := make(chan msg, 10)
+	go linker(toLinkerChan, usersmutex)
 	nextID := 1
 
 	for {
@@ -35,64 +44,55 @@ func main() {
 			log.Printf("Error accepting connection: %v", err)
 		}
 
-		newuser := client{nextID, "add", channels{make(chan string), make(chan string)}}
-		go userConnected(conn, newuser, cmdChan)
-		cmdChan <- newuser
+		newuser := client{nextID, make(chan string, 5)}
+
+		usersmutex.Lock()
+		Users[nextID] = newuser
+		usersmutex.Unlock()
+
+		go userConnected(conn, newuser, toLinkerChan, usersmutex)
+		toLinkerChan <- msg{SYSTEM_ID, "Guest" + strconv.Itoa(newuser.ID) + " has joined the chat\n"}
 		nextID++
 	}
 }
 
-func linker(cmdChan chan client) {
-	users := map[int]client{}
-	usereventmsg := ""
-	newmessage := ""
+func linker(toLinkerChan chan msg, usersmutex *sync.Mutex) {
+	var newmessage string
 
 	for {
 		select {
-		case userevent := <-cmdChan:
-			if userevent.cmd == "add" {
-				users[userevent.ID] = userevent
-				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has joined the chat\n"
-			} else if userevent.cmd == "del" {
-				delete(users, userevent.ID)
-				usereventmsg = "System message: Guest" + strconv.Itoa(userevent.ID) + " has disconnected\n"
+		case message := <-toLinkerChan:
+			if message.userID == 0 {
+				newmessage = "System message: " + message.body
+			} else {
+				newmessage = "Guest" + strconv.Itoa(message.userID) + ": " + message.body
 			}
-		default:
-		}
 
-		if usereventmsg != "" {
-			for _, u := range users {
-				u.chans.toClient <- usereventmsg
+			usersmutex.Lock()
+			for _, u := range Users {
+				select {
+				case u.toClientChan <- newmessage:
+				case <-time.After(time.Millisecond * 10):
+				}
 			}
-			usereventmsg = ""
-		}
-
-		for _, u := range users {
-			select {
-			case newmessage = <-u.chans.toLinker:
-				newmessage = "Guest" + strconv.Itoa(u.ID) + ": " + newmessage
-				break
-			default:
-			}
-		}
-
-		if newmessage != "" {
-			for _, u := range users {
-				u.chans.toClient <- newmessage
-			}
-			newmessage = ""
+			usersmutex.Unlock()
 		}
 	}
 }
 
-func userConnected(conn net.Conn, user client, cmdChan chan client) {
+func userConnected(conn net.Conn, user client, toLinkerChan chan msg, usersmutex *sync.Mutex) {
+	defer func() {
+		usersmutex.Lock()
+		delete(Users, user.ID)
+		usersmutex.Unlock()
+		conn.Close()
+		close(user.toClientChan)
+	}()
+
 	conn.Write([]byte("Hello Guest" + strconv.Itoa(user.ID) + "!\n"))
-	defer conn.Close()
-	defer close(user.chans.toClient)
-	defer close(user.chans.toLinker)
 
 	go func() {
-		for message := range user.chans.toClient {
+		for message := range user.toClientChan {
 			conn.Write([]byte(message))
 		}
 	}()
@@ -101,16 +101,15 @@ func userConnected(conn net.Conn, user client, cmdChan chan client) {
 	for {
 		str, err := rd.ReadString('\n')
 		if err != nil {
-			cmdChan <- client{user.ID, "del", channels{nil, nil}}
 			log.Printf("Guest%v disconnected: %v", strconv.Itoa(user.ID), err)
+			toLinkerChan <- msg{SYSTEM_ID, "Guest" + strconv.Itoa(user.ID) + " has been disconnected\n"}
 			return
 		}
-		// log.Println([]byte(str))
 		if str == "exit\n" || str == "exit\r\n" {
-			cmdChan <- client{user.ID, "del", channels{nil, nil}}
 			log.Printf(`Guest%v typed "exit"`, strconv.Itoa(user.ID))
+			toLinkerChan <- msg{SYSTEM_ID, "Guest" + strconv.Itoa(user.ID) + " has been disconnected\n"}
 			return
 		}
-		user.chans.toLinker <- str
+		toLinkerChan <- msg{user.ID, str}
 	}
 }
