@@ -19,8 +19,8 @@ type msg struct {
 	body   string
 }
 
-// Users - global access map listing all users connected
-var Users map[int]client
+var users map[int]client
+var usersMutex *sync.Mutex
 
 // SYSTEM_ID - ID for System messages
 const SYSTEM_ID int = 0
@@ -32,10 +32,10 @@ func main() {
 	}
 	defer l.Close()
 
-	usersmutex := &sync.Mutex{}
-	Users = make(map[int]client)
+	users = make(map[int]client)
+	usersMutex = &sync.Mutex{}
 	toLinkerChan := make(chan msg, 10)
-	go linker(toLinkerChan, usersmutex)
+	go linker(toLinkerChan)
 	nextID := 1
 
 	for {
@@ -46,45 +46,42 @@ func main() {
 
 		newuser := client{nextID, make(chan string, 5)}
 
-		usersmutex.Lock()
-		Users[nextID] = newuser
-		usersmutex.Unlock()
+		usersMutex.Lock()
+		users[nextID] = newuser
+		usersMutex.Unlock()
 
-		go userConnected(conn, newuser, toLinkerChan, usersmutex)
+		go userConnected(conn, newuser, toLinkerChan)
 		toLinkerChan <- msg{SYSTEM_ID, "Guest" + strconv.Itoa(newuser.ID) + " has joined the chat\n"}
 		nextID++
 	}
 }
 
-func linker(toLinkerChan chan msg, usersmutex *sync.Mutex) {
+func linker(toLinkerChan chan msg) {
 	var newmessage string
 
-	for {
-		select {
-		case message := <-toLinkerChan:
-			if message.userID == 0 {
-				newmessage = "System message: " + message.body
-			} else {
-				newmessage = "Guest" + strconv.Itoa(message.userID) + ": " + message.body
-			}
-
-			usersmutex.Lock()
-			for _, u := range Users {
-				select {
-				case u.toClientChan <- newmessage:
-				case <-time.After(time.Millisecond * 10):
-				}
-			}
-			usersmutex.Unlock()
+	for message := range toLinkerChan {
+		if message.userID == 0 {
+			newmessage = "System message: " + message.body
+		} else {
+			newmessage = "Guest" + strconv.Itoa(message.userID) + ": " + message.body
 		}
+
+		usersMutex.Lock()
+		for _, u := range users {
+			select {
+			case u.toClientChan <- newmessage:
+			case <-time.After(time.Millisecond * 10):
+			}
+		}
+		usersMutex.Unlock()
 	}
 }
 
-func userConnected(conn net.Conn, user client, toLinkerChan chan msg, usersmutex *sync.Mutex) {
+func userConnected(conn net.Conn, user client, toLinkerChan chan msg) {
 	defer func() {
-		usersmutex.Lock()
-		delete(Users, user.ID)
-		usersmutex.Unlock()
+		usersMutex.Lock()
+		delete(users, user.ID)
+		usersMutex.Unlock()
 		conn.Close()
 		close(user.toClientChan)
 	}()
