@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"log"
 	"net"
 	"strconv"
@@ -37,6 +38,8 @@ func main() {
 	toLinkerChan := make(chan msg, 10)
 	go linker(toLinkerChan)
 	nextID := 1
+
+	log.Println("Server started.")
 
 	for {
 		conn, err := l.Accept()
@@ -86,15 +89,36 @@ func userConnected(conn net.Conn, user client, toLinkerChan chan msg) {
 		close(user.toClientChan)
 	}()
 
-	conn.Write([]byte("Hello Guest" + strconv.Itoa(user.ID) + "!\n"))
+	gzWriter := gzip.NewWriter(conn)
+
+	gzWriter.Write([]byte("Hello Guest" + strconv.Itoa(user.ID) + "!\n"))
+	err := gzWriter.Flush()
+
+	if err != nil {
+		log.Printf("Can't flush. %v", err)
+		return
+	}
+
+	gzReader, err := gzip.NewReader(conn)
+
+	if err != nil {
+		log.Printf("Something wrong with gzReader. %v", err)
+		return
+	}
 
 	go func() {
 		for message := range user.toClientChan {
-			conn.Write([]byte(message))
+			gzWriter.Write([]byte(message))
+			err := gzWriter.Flush()
+
+			if err != nil {
+				log.Printf("Can't flush. %v", err)
+				return
+			}
 		}
 	}()
 
-	rd := bufio.NewReader(conn)
+	rd := bufio.NewReader(gzReader)
 	for {
 		str, err := rd.ReadString('\n')
 		if err != nil {

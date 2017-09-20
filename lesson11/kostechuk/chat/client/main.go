@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"fmt"
 	"log"
 	"net"
@@ -15,8 +16,21 @@ func main() {
 	}
 	defer conn.Close()
 
+	log.Println("Client started & connected.")
+
+	gzWriter := gzip.NewWriter(conn)
+	log.Println("gzWriter created.")
+
+	gzReader, err := gzip.NewReader(conn)
+	log.Println("gzReader created.")
+
+	if err != nil {
+		log.Printf("Something wrong with gzReader. %v", err)
+		return
+	}
+
 	go func() {
-		rd := bufio.NewReader(conn)
+		rd := bufio.NewReader(gzReader)
 		for {
 			str, err := rd.ReadString('\n')
 			if err != nil {
@@ -30,7 +44,13 @@ func main() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			input := scanner.Text() + "\n"
-			conn.Write([]byte(input))
+			gzWriter.Write([]byte(input))
+			err := gzWriter.Flush()
+
+			if err != nil {
+				log.Printf("Can't flush. %v", err)
+				return
+			}
 		}
 
 		if err := scanner.Err(); err != nil {
