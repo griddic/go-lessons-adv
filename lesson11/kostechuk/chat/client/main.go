@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 )
 
 func main() {
@@ -19,17 +20,21 @@ func main() {
 		for {
 			str, err := rd.ReadString('\n')
 			if err != nil {
-				log.Fatal("Connection lost ", err)
+				log.Fatal("Connection lost. ", err)
 			}
-			fmt.Println(str)
+			fmt.Print(str)
 		}
 	}()
 
 	for {
-		input := ""
-		_, err = fmt.Scanln(&input)
-		input = input + "\n"
-		conn.Write([]byte(input))
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			input := scanner.Text() + "\n"
+			conn.Write([]byte(input))
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Fatal("Scanner broke. ", err)
+		}
 	}
-	// time.Sleep(time.Second * 30)
 }
